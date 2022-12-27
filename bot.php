@@ -212,7 +212,7 @@ if ( isset( $argv ) && count( $argv ) > 1 ) {
         $order = $data["orders"][ $tx["result"]["details"][0]["address"] ];
         
         // Сверяем сумму
-        if ( $order && $products[ $order["sku"] ]["price"] <= $tx["result"]["amount"] ) {
+        if ( $order && $order["sum"] <= $tx["result"]["amount"] ) {
             // Отправляем товар пользователю
             $r = telegram( "sendMessage", array(
                 "chat_id" => $order["chat_id"],
@@ -298,25 +298,44 @@ if ( ! empty( $input["message"] ) && $input["message"]["text"] === "/start" ) {
     // Получаем у ноды адрес для оплаты
     $addr = rpc( array( "method" => "getnewaddress", "params" => [] ) );
     file_put_contents( __DIR__ . "/input.log", '$addr = ' . var_export( $addr, true) . ";\n", FILE_APPEND );
-    
+
+    $sku = $input["callback_query"]["data"];
+    // Сумма
+    if ( $products[$sku]["currency"] === "dash" ) {
+        $sum = $products[$sku]["price"];
+    } elseif ( $products[$sku]["currency"] === "rub" ) {
+        update_dashrub(); // Обновляем курс
+        $sum = round( $products[$sku]["price"] / $data["dashrub"]["price"], 6 );
+    } else {
+        $r = telegram( "sendMessage", array(
+            "chat_id" => $input["callback_query"]["message"]["chat"]["id"],
+            "text" => "Продавец был пьян и указал неверную валюту.",
+        ) );
+        // Уведомляем Телеграм что получили запрос, чтобы крутяшка на кнопке остановилась
+        // https://core.telegram.org/bots/api#answercallbackquery
+        $r = telegram( "answerCallbackQuery", array(
+            "callback_query_id" => $input["callback_query"]["id"],
+        ) );
+        return;
+    }
+
     // Записываем адрес и sku товара
     // Адрес на который будет поступать оплата считаем номером заказа
     // и сохраняем в $data["orders"]
     $addr = $addr["result"];
     $data["orders"][$addr] = array(
         "user" => $input["callback_query"]["from"]["id"],
-        "sku" => $input["callback_query"]["data"],
-        "chat_id" => $input["callback_query"]["message"]["chat"]["id"]
+        "sku" => $sku,
+        "chat_id" => $input["callback_query"]["message"]["chat"]["id"],
+        "sum" => $sum,
+        "curr" => "dash",
     );
 
     // Сохраняем данные
     save_data();
 
     // Наименование
-    $name = $products[ $input["callback_query"]["data"] ]["name"];
-
-    // Сумма
-    $sum = $products[ $input["callback_query"]["data"] ]["price"];
+    $name = $products[$sku]["name"];
     
     // Отправляем пользователю
     // Есть проблема со ссылками типа <a href='dash://{$addr}?amount={$sum}'>Оплатить</a>
@@ -330,7 +349,7 @@ if ( ! empty( $input["message"] ) && $input["message"]["text"] === "/start" ) {
     $r = telegram( "sendMessage", array(
         "chat_id" => $input["callback_query"]["message"]["chat"]["id"],
         "parse_mode" => "HTML",
-        "text" => "{$name}\n{$addr}\nКопируйте все сообщение, мобильный кошелек сам найдет в нем адрес."
+        "text" => "{$name}\n{$addr}\n{$sum} dash\nКопируйте все сообщение, мобильный кошелек сам найдет в нем адрес."
         /*. "\n\n<a href='https://play.google.com/store/apps/details?id=hashengineering.darkcoin.wallet&launch=true&pay={$addr}&amount={$sum}'>Готовая ссылка для оплаты для Android</a>" */
         /*. "\n<a href='dash://{$addr}?amount={$sum}'>Ссылка со схемой dash:addr?amount=sum</a>"*/,
         "disable_web_page_preview" => true,
@@ -343,4 +362,23 @@ if ( ! empty( $input["message"] ) && $input["message"]["text"] === "/start" ) {
     $r = telegram( "answerCallbackQuery", array(
         "callback_query_id" => $input["callback_query"]["id"],
     ) );
+}
+
+
+// Функция обновления курса
+function update_dashrub() {
+    global $data, $bot;
+    if ( ! isset( $data["dashrub"]["date"] ) ) {
+        $data["dashrub"]["date"] = 0;
+    }
+    if ( $data["dashrub"]["date"] < time() - 61 ) {
+        $json = file_get_contents( "https://rates2.dashretail.org/rates?source=dashretail&symbol=dashrub" );
+        $arr = json_decode( $json, true );
+        if ( is_array( $arr ) ) {
+            $data["dashrub"] = array(
+                "price" => $arr[0]["price"],
+                "date" => time(),
+            );
+        }
+    }
 }
