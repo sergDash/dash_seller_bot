@@ -330,7 +330,7 @@ if ( ! empty( $input["message"] ) && $input["message"]["text"] === "/start" ) {
     $r = telegram( "sendMessage", array(
         "chat_id" => $input["callback_query"]["message"]["chat"]["id"],
         "parse_mode" => "HTML",
-        "text" => "{$name}\n{$addr}\nКопируйте все сообщение, кошелек сам найдет в нем адрес."
+        "text" => "{$name}\n{$addr}\nКопируйте все сообщение, мобильный кошелек сам найдет в нем адрес."
         /*. "\n\n<a href='https://play.google.com/store/apps/details?id=hashengineering.darkcoin.wallet&launch=true&pay={$addr}&amount={$sum}'>Готовая ссылка для оплаты для Android</a>" */
         /*. "\n<a href='dash://{$addr}?amount={$sum}'>Ссылка со схемой dash:addr?amount=sum</a>"*/,
         "disable_web_page_preview" => true,
