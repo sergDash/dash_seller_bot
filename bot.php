@@ -315,10 +315,11 @@ if ( ! empty( $input["message"] ) && $input["message"]["text"] === "/start" ) {
     // Наименование
     $name = $products[ $input["callback_query"]["data"] ]["name"];
 
+    $sum = $products[ $input["callback_query"]["data"] ]["price"];
     // Отправляем пользователю
     $r = telegram( "sendMessage", array(
         "chat_id" => $input["callback_query"]["message"]["chat"]["id"],
-        "text" => "{$addr}\n{$name}",
+        "text" => "{$addr}\n{$name}\n\nГотовая ссылка для оплаты:\nhttps://play.google.com/store/apps/details?id=hashengineering.darkcoin.wallet&launch=true&pay={$addr}&amount={$sum}",
     ) );
 
     // Уведомляем Телеграм что получили запрос, чтобы крутяшка на кнопке остановилась
