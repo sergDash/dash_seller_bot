@@ -244,7 +244,6 @@ if ( empty( $input_raw ) ) {
 // Преобразуем входные данные в обычный массив
 $input = json_decode( $input_raw, true );
 // NULL если не парсится
-// 
 
 if ( ! is_array( $input ) ) {
     exit();
@@ -268,7 +267,7 @@ if ( ! empty( $input["message"] ) && $input["message"]["text"] === "/start" ) {
     save_data();
 
     // Создаем описание товаров и кнопки для покупки
-    $products_list = "Привет, {$input["message"]["from"]["first_name"]}! Выбери товар.\n\n";
+    $products_list = "Привет, {$input["message"]["from"]["first_name"]}! Выберите товар.\n\n";
     $buttons = array();
     foreach( $products as $sku => $prod ) {
         // Описание
@@ -294,12 +293,15 @@ if ( ! empty( $input["message"] ) && $input["message"]["text"] === "/start" ) {
         ) ) ),
     ) );
 
-} elseif ( ! empty( $input["callback_query"] ) ) {
+} elseif ( ! empty( $input["callback_query"] ) ) { // Кто-то нажал на кнопку
+
     // Получаем у ноды адрес для оплаты
     $addr = rpc( array( "method" => "getnewaddress", "params" => [] ) );
     file_put_contents( __DIR__ . "/input.log", '$addr = ' . var_export( $addr, true) . ";\n", FILE_APPEND );
     
     // Записываем адрес и sku товара
+    // Адрес на который будет поступать оплата считаем номером заказа
+    // и сохраняем в $data["orders"]
     $addr = $addr["result"];
     $data["orders"][$addr] = array(
         "user" => $input["callback_query"]["from"]["id"],
@@ -317,5 +319,11 @@ if ( ! empty( $input["message"] ) && $input["message"]["text"] === "/start" ) {
     $r = telegram( "sendMessage", array(
         "chat_id" => $input["callback_query"]["message"]["chat"]["id"],
         "text" => "{$addr}\n{$name}",
+    ) );
+
+    // Уведомляем Телеграм что получили запрос, чтобы крутяшка на кнопке остановилась
+    // https://core.telegram.org/bots/api#answercallbackquery
+    $r = telegram( "answerCallbackQuery", array(
+        "callback_query_id" => $input["callback_query"]["id"],
     ) );
 }
