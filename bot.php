@@ -324,10 +324,15 @@ if ( ! empty( $input["message"] ) && $input["message"]["text"] === "/start" ) {
     // Телеграм их не пропускает.
     // Рекомендуют отправлять на сайт и там редиректить на адреса со схемой dash
     // Но такое решение нам пока не подходит.
+    // И есть вторая проблема со ссылками
+    // <a href='https://play.google.com/store/apps/details?id=hashengineering.darkcoin.wallet&launch=true&pay={$addr}&amount={$sum}'>Готовая ссылка для оплаты для Android</a>
+    // Приложение запускается но не заполняет сумму и адрес. Видимо Гугл тоже срезает параметры.
     $r = telegram( "sendMessage", array(
         "chat_id" => $input["callback_query"]["message"]["chat"]["id"],
         "parse_mode" => "HTML",
-        "text" => "{$addr}\n{$name}\n\n<a href='https://play.google.com/store/apps/details?id=hashengineering.darkcoin.wallet&launch=true&pay={$addr}&amount={$sum}'>Готовая ссылка для оплаты для Android</a>" /*. "\n<a href='dash://{$addr}?amount={$sum}'>Ссылка со схемой dash:addr?amount=sum</a>"*/,
+        "text" => "{$name}\n{$addr}\nКопируйте все сообщение, кошелек сам найдет в нем адрес."
+        /*. "\n\n<a href='https://play.google.com/store/apps/details?id=hashengineering.darkcoin.wallet&launch=true&pay={$addr}&amount={$sum}'>Готовая ссылка для оплаты для Android</a>" */
+        /*. "\n<a href='dash://{$addr}?amount={$sum}'>Ссылка со схемой dash:addr?amount=sum</a>"*/,
         "disable_web_page_preview" => true,
     ) );
     file_put_contents( __DIR__ . "/input.log", "----- " . date( "Y-m-d H:i:s", time() ) . " -----\n", FILE_APPEND );
