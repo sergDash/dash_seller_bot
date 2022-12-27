@@ -315,12 +315,23 @@ if ( ! empty( $input["message"] ) && $input["message"]["text"] === "/start" ) {
     // Наименование
     $name = $products[ $input["callback_query"]["data"] ]["name"];
 
+    // Сумма
     $sum = $products[ $input["callback_query"]["data"] ]["price"];
+    
     // Отправляем пользователю
+    // Есть проблема со ссылками типа <a href='dash://{$addr}?amount={$sum}'>Оплатить</a>
+    // https://github.com/tdlib/telegram-bot-api/issues/299
+    // Телеграм их не пропускает.
+    // Рекомендуют отправлять на сайт и там редиректить на адреса со схемой dash
+    // Но такое решение нам пока не подходит.
     $r = telegram( "sendMessage", array(
         "chat_id" => $input["callback_query"]["message"]["chat"]["id"],
-        "text" => "{$addr}\n{$name}\n\nГотовая ссылка для оплаты:\nhttps://play.google.com/store/apps/details?id=hashengineering.darkcoin.wallet&launch=true&pay={$addr}&amount={$sum}",
+        "parse_mode" => "HTML",
+        "text" => "{$addr}\n{$name}\n\n<a href='https://play.google.com/store/apps/details?id=hashengineering.darkcoin.wallet&launch=true&pay={$addr}&amount={$sum}'>Готовая ссылка для оплаты для Android</a>" /*. "\n<a href='dash://{$addr}?amount={$sum}'>Ссылка со схемой dash:addr?amount=sum</a>"*/,
+        "disable_web_page_preview" => true,
     ) );
+    file_put_contents( __DIR__ . "/input.log", "----- " . date( "Y-m-d H:i:s", time() ) . " -----\n", FILE_APPEND );
+    file_put_contents( __DIR__ . "/input.log", var_export( $r, true ) . "\n", FILE_APPEND );
 
     // Уведомляем Телеграм что получили запрос, чтобы крутяшка на кнопке остановилась
     // https://core.telegram.org/bots/api#answercallbackquery
