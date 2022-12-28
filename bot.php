@@ -84,33 +84,31 @@ require( __DIR__ . "/config.php" );
 
 
 // Функция для работы с Telegram API
-function telegram( $cmd, $data = array() ) {
+function telegram( $cmd, $data = [] ) {
     global $bot;
     $curl = curl_init();
-    curl_setopt_array( $curl, array(
+    curl_setopt_array( $curl, [
         CURLOPT_URL => "https://api.telegram.org/bot{$bot['token']}/{$cmd}",
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_POST => true,
         CURLOPT_CONNECTTIMEOUT => 5,
         CURLOPT_TIMEOUT => 60,
         CURLOPT_POSTFIELDS => http_build_query( $data ),
-    ) );
+    ] );
     $resp = curl_exec( $curl );
     curl_close( $curl );
-    // Для отладки раскомментируйте
-    //file_put_contents( __DIR__ . "/input.log", $resp . "\n", FILE_APPEND );
     return json_decode( $resp, true );
 }
 
 
 // Функция для работы с Dash RPC
-function rpc( $data = array() ) {
+function rpc( $data = [] ) {
     global $bot;
     $data["jsonrpc"] = "1.0";
     $data["id"] = microtime();
     $curl = curl_init();
     $json = json_encode( $data );
-    curl_setopt_array( $curl, array(
+    curl_setopt_array( $curl, [
         CURLOPT_URL => $bot["dashd_url"],
         CURLOPT_PORT => $bot["dashd_port"],
         CURLOPT_USERPWD => "{$bot['rpcuser']}:{$bot['rpcpassword']}",
@@ -120,13 +118,22 @@ function rpc( $data = array() ) {
         CURLOPT_CONNECTTIMEOUT => 1,
         CURLOPT_TIMEOUT => 1,
         CURLOPT_POSTFIELDS => $json,
-        CURLOPT_HTTPHEADER => array( 'Content-type: text/plain', 'Content-length: ' . strlen( $json ) ),
-    ) );
+        CURLOPT_HTTPHEADER => [ "Content-type: text/plain", "Content-length: " . strlen( $json ) ],
+    ] );
     $resp = curl_exec( $curl );
     curl_close( $curl );
-    //file_put_contents( __DIR__ . "/input.log", '$resp = ' . var_export( $resp, true) . ";\n", FILE_APPEND );
     return json_decode( $resp, true );
 }
+
+
+// Логика дяльнейшего кода делится на три части.
+// Информация может поступать к боту из трех мест.
+// Во-первых, это две команды через адресную строку браузера install и uninstall, через $_GET.
+// Во-вторых, уведомления от Ноды, о входящих и исходящих монетах, через параметр командной строки $argv.
+// В-третьих, от Телеграма, через php://input.
+// Все три обработчика расположены друг за другом.
+// Если один из них не находит для себя информацию, то исполнение продолжается и следующий ищет свое.
+// Это такая вот подсказочка, чтобы не блуждать по коду.
 
 
 // Команды управления ботом через адресную строку браузера
@@ -137,11 +144,20 @@ if ( isset( $_GET["cmd"] ) ) {
     switch ( $_GET["cmd"] ) {
 
         case "uninstall":
-            exit( var_export( telegram( "setWebhook" ), true ) );
+            $answer = telegram( "setWebhook" );
+            echo( var_export( $answer, true ) );
+            return;
         break;
 
         case "install":
-            exit( var_export( telegram( "setWebhook", array( "url" => "https://{$_SERVER['SERVER_NAME']}{$_SERVER['PHP_SELF']}" ) ), true ) );
+            $answer = telegram(
+                "setWebhook",
+                [
+                    "url" => "https://{$_SERVER['SERVER_NAME']}{$_SERVER['PHP_SELF']}"
+                ]
+            );
+            echo( var_export( $answer, true ) );
+            return;
         break;
 
     }
@@ -149,15 +165,17 @@ if ( isset( $_GET["cmd"] ) ) {
 
 
 // Список товаров
-if ( file_exists( __DIR__ . "/products.php" ) && $products_file = fopen( __DIR__ . "/products.php", "r" ) ) {
+$products_php = __DIR__ . "/products.php";
+if ( file_exists( $products_php ) && $fp = fopen( $products_php, "r" ) ) {
     // Блокируем файл чтобы не прочитать мусор в тот момент когда
     // работает команда записи в файл
-    flock( $products_file, LOCK_SH );
-    include( __DIR__ . "/products.php" );
+    flock( $fp, LOCK_SH );
+    include( $products_php );
     // разблокируем
-    flock( $products_file, LOCK_UN );
+    flock( $fp, LOCK_UN );
+    fclose( $fp );
 } else {
-    $products = array();
+    $products = [];
 }
 
 
@@ -165,15 +183,17 @@ if ( file_exists( __DIR__ . "/products.php" ) && $products_file = fopen( __DIR__
 // Все что нам нужно для работы бота, сохраняем в самом обычном php-файле
 // в виде массива, который считывается командой include и все данные
 // возвращаются на свои места.
-if ( file_exists( __DIR__ . "/data.php" ) && $data_file = fopen( __DIR__ . "/data.php", "r" ) ) {
+$data_php = __DIR__ . "/data.php";
+if ( file_exists( $data_php ) && $fp = fopen( $data_php, "r" ) ) {
     // Блокируем файл чтобы не прочитать мусор в тот момент когда
     // работает команда записи в файл
-    flock( $data_file, LOCK_SH );
-    include( __DIR__ . "/data.php" );
+    flock( $fp, LOCK_SH );
+    include( $data_php );
     // разблокируем
-    flock( $data_file, LOCK_UN );
+    flock( $fp, LOCK_UN );
+    fclose( $fp );
 } else {
-    $data = array();
+    $data = [];
 }
 
 
@@ -181,8 +201,22 @@ if ( file_exists( __DIR__ . "/data.php" ) && $data_file = fopen( __DIR__ . "/dat
 function save_data() {
     global $data;
     // Она тоже блокирует файл чтобы предотвратить одновременную запись
-    @$r = file_put_contents( __DIR__ . "/data.php", '<?php $data = ' . var_export( $data, true) . ";\n", LOCK_EX );
+    $data_php = __DIR__ . "/data.php";
+    $export = '<?php $data = ' . var_export( $data, true) . ";\n";
+    $r = file_put_contents( $data_php, $export, LOCK_EX );
     return $r;
+}
+
+
+// Функция для ведения лога
+function input_log( $var, $label = "" ) {
+    if ( is_array( $var ) ) {
+        $str = var_export( $var, true );
+    } else {
+        $str = $var;
+    }
+    $log = date( "Y-m-d H:i:s " ) . "{$label}{$str}\n";
+    file_put_contents( __DIR__ . "/input.log", $log, FILE_APPEND );
 }
 
 
@@ -197,10 +231,7 @@ function save_data() {
 // что был перевод не в кошелек, а из него.
 if ( isset( $argv ) && count( $argv ) > 1 ) {
     $txid = $argv[1];
-    //file_put_contents( __DIR__ . "/input.log", "----- " . date( "Y-m-d H:i:s", time() ) . " -----\n", FILE_APPEND );
-    //file_put_contents( __DIR__ . "/input.log", '$argv = ' . var_export( $argv, true) . ";\n", FILE_APPEND );
-    $tx = rpc( array( "method" => "gettransaction", "params" => [ $txid ] ) );
-    //file_put_contents( __DIR__ . "/input.log", '$tx = ' . var_export( $tx, true) . ";\n", FILE_APPEND );
+    $tx = rpc( [ "method" => "gettransaction", "params" => [ $txid ] ] );
 
     // Обрабатываем транзакцию
     if ( $tx["error"] !== NULL ) {
@@ -208,25 +239,36 @@ if ( isset( $argv ) && count( $argv ) > 1 ) {
 
     } elseif ( $tx["result"] !== NULL ) {
 
+        $tx = $tx["result"];
+
         // Извлекаем заказ (адрес на который пришел перевод)
-        $order = $data["orders"][ $tx["result"]["details"][0]["address"] ];
+        $order_no = $tx["details"][0]["address"];
+        $order = $data["orders"][ $order_no ];
         
         // Сверяем сумму
-        if ( $order && $order["sum"] <= $tx["result"]["amount"] ) {
+        if ( $order && $order["sum"] <= $tx["amount"] ) {
             // Отправляем товар пользователю
-            $r = telegram( "sendMessage", array(
-                "chat_id" => $order["chat_id"],
-                "text" => $products[ $order["sku"] ]["product"],
-            ) );
+            $sku = $order["sku"];
+            $r = telegram(
+                "sendMessage",
+                [
+                    "chat_id" => $order["chat_id"],
+                    "text" => $products[$sku]["product"],
+                ]
+            );
         }
 
 
         // Переправить дальше:
-        if ( ! empty( $bot["resend_to_address"] ) && $tx["result"]["amount"] > 0 ) {
-            // ./dash-cli sendtoaddress "address" amount ( "comment" "comment_to" subtractfeefromamount use_is use_cj conf_target "estimate_mode" avoid_reuse )
-            $resend = rpc( array( "method" => "sendtoaddress", "params" => [ $bot["resend_to_address"], $tx["result"]["amount"], "", "", true, true ] ) );
+        if ( ! empty( $bot["resend_to_address"] ) && $tx["amount"] > 0 ) {
+            // ./dash-cli help sendtoaddress
+            $resend = rpc( [
+                "method" => "sendtoaddress",
+                "params" => [
+                    $bot["resend_to_address"], $tx["amount"], "", "", true
+                ]
+            ] );
             // После переправки, бот снова получит уведомление о выполнении операции. Там сумма будет отрицательной.
-            //file_put_contents( __DIR__ . "/input.log", '$resend = ' . var_export( $resend, true) . ";\n", FILE_APPEND );
         }
     }
 
@@ -238,100 +280,124 @@ if ( isset( $argv ) && count( $argv ) > 1 ) {
 $input_raw = file_get_contents( "php://input" );
 
 if ( empty( $input_raw ) ) {
-    exit();
+    return;
 }
 
 // Преобразуем входные данные в обычный массив
-$input = json_decode( $input_raw, true );
-// NULL если не парсится
+$input = json_decode( $input_raw, true ); // NULL если не парсится
 
 if ( ! is_array( $input ) ) {
-    exit();
+    return;
 }
 
 // Для отладки
-file_put_contents( __DIR__ . "/input.log", "----- " . date( "Y-m-d H:i:s", time() ) . " -----\n", FILE_APPEND );
-file_put_contents( __DIR__ . "/input.log", var_export( $input, true ) . "\n", FILE_APPEND );
+input_log( $input, 'Telegram $input = ' );
 
 
 // Диалог с пользователем
 
 if ( ! empty( $input["message"] ) && $input["message"]["text"] === "/start" ) {
-    // Регистрируем пользователя
-    $data["users"][ $input["message"]["from"]["id"] ] = array(
-        "date" => date( "Y-m-d H:i:s", $input["message"]["date"] ),
-        "chat_id" => $input["message"]["chat"]["id"],
-    );
-    
-    // Сохраняем данные
-    save_data();
 
     // Создаем описание товаров и кнопки для покупки
-    $products_list = "Привет, {$input["message"]["from"]["first_name"]}! Выберите товар.\n\n";
-    $buttons = array();
+    $user_name = $input["message"]["from"]["first_name"];
+    $products_list = "Привет, {$user_name}! Выберите товар.\n\n";
+    $buttons = [];
     foreach( $products as $sku => $prod ) {
         // Описание
         $products_list .= "{$prod["name"]}\n{$prod["description"]}\n\n";
 
         // Кнопка
-        $but = array(
+        $but = [
             "text" => $prod["name"],
-            "callback_data" => $sku,
-        );
+            "callback_data" => $sku, // артикул товара
+        ];
         array_push( $buttons, $but );
     }
+    // Логику разбивки товаров на строки кнопок можно еще доделать,
+    // либо в ручную прописывать в какой строке должна быть кнопка,
+    // либо чтобы автомат их разбрасывал сам.
 
 
     // Приветствуем и показываем кнопки.
     // https://core.telegram.org/bots/api#sendmessage
     // https://core.telegram.org/bots/api#inlinekeyboardmarkup
-    $r = telegram( "sendMessage", array(
-        "chat_id" => $input["message"]["chat"]["id"],
-        "text" => $products_list,
-        "reply_markup" => json_encode( array( "inline_keyboard" => array(
-            $buttons
-        ) ) ),
-    ) );
+    $keyboard = [
+        $buttons, // строка кнопок 1
+        $buttons, // строка кнопок 2
+    ];
+    $markup = json_encode( [
+        "inline_keyboard" => $keyboard,
+    ] );
+    $r = telegram(
+        "sendMessage",
+        [
+            "chat_id" => $input["message"]["chat"]["id"],
+            "text" => $products_list,
+            "reply_markup" => $markup,
+        ]
+    );
 
 } elseif ( ! empty( $input["callback_query"] ) ) { // Кто-то нажал на кнопку
 
     // Получаем у ноды адрес для оплаты
-    $addr = rpc( array( "method" => "getnewaddress", "params" => [] ) );
-    file_put_contents( __DIR__ . "/input.log", '$addr = ' . var_export( $addr, true) . ";\n", FILE_APPEND );
+    $addr = rpc( [ "method" => "getnewaddress", "params" => [] ] );
+    input_log( $addr, 'Dash $addr = ' );
 
-    $sku  = $input["callback_query"]["data"];
+    $sku  = $input["callback_query"]["data"]; // артикул товара
     $curr = $products[$sku]["currency"];
+
     // Сумма
+    // Записываем сумму в дешах.
+    // Потому что курс деша, получаемый нами,
+    // будет отличаться от курса, получаемого кошельком, на момент оплаты пользователем.
+    // И с вероятность 50%+ оплата не пройдет.
+    // 50% потому, что курс может либо расти, либо падать.
+    // А + это разница курсов на разных сервисах прибавляет плохой вероятности.
+    // Так же мы не будем ограничивать платеж по времени,
+    // это отдельная сложная логика, которая может потребовать возвратов,
+    // но кто-то может оплатить с биржи и возврат может быть потерян.
     if ( $curr === "dash" ) {
+
         $sum = $products[$sku]["price"];
+
     } elseif ( $curr === "rub" ) {
+
         update_dashrub(); // Обновляем курс
         $sum = round( $products[$sku]["price"] / $data["dashrub"]["price"], 6 );
+
     } else {
+
         // Неверная валюта
-        $r = telegram( "sendMessage", array(
-            "chat_id" => $input["callback_query"]["message"]["chat"]["id"],
-            "text" => "Продавец был пьян и указал неверную валюту.",
-        ) );
+        $r = telegram(
+            "sendMessage", 
+            [
+                "chat_id" => $input["callback_query"]["message"]["chat"]["id"],
+                "text" => "Продавец был пьян и указал неверную валюту.",
+            ]
+        );
+
         // Уведомляем Телеграм что получили запрос, чтобы крутяшка на кнопке остановилась
         // https://core.telegram.org/bots/api#answercallbackquery
-        $r = telegram( "answerCallbackQuery", array(
-            "callback_query_id" => $input["callback_query"]["id"],
-        ) );
+        $r = telegram(
+            "answerCallbackQuery",
+            [
+                "callback_query_id" => $input["callback_query"]["id"],
+            ]
+        );
         return;
+
     }
 
-    // Записываем адрес и sku товара
+    // Оформляем и сохраняем заказ.
     // Адрес на который будет поступать оплата считаем номером заказа
     // и сохраняем в $data["orders"]
     $addr = $addr["result"];
-    $data["orders"][$addr] = array(
+    $data["orders"][$addr] = [
         "user" => $input["callback_query"]["from"]["id"],
         "sku" => $sku,
         "chat_id" => $input["callback_query"]["message"]["chat"]["id"],
         "sum" => $sum,
-        "curr" => "dash",
-    );
+    ];
 
     // Сохраняем данные
     save_data();
@@ -348,22 +414,24 @@ if ( ! empty( $input["message"] ) && $input["message"]["text"] === "/start" ) {
     // И есть вторая проблема со ссылками
     // <a href='https://play.google.com/store/apps/details?id=hashengineering.darkcoin.wallet&launch=true&pay={$addr}&amount={$sum}'>Готовая ссылка для оплаты для Android</a>
     // Приложение запускается но не заполняет сумму и адрес. Видимо Гугл тоже срезает параметры.
-    $r = telegram( "sendMessage", array(
-        "chat_id" => $input["callback_query"]["message"]["chat"]["id"],
-        "parse_mode" => "HTML",
-        "text" => "{$name}\n{$addr}\n{$sum} dash\nКопируйте все сообщение, мобильный кошелек сам найдет в нем адрес."
-        /*. "\n\n<a href='https://play.google.com/store/apps/details?id=hashengineering.darkcoin.wallet&launch=true&pay={$addr}&amount={$sum}'>Готовая ссылка для оплаты для Android</a>" */
-        /*. "\n<a href='dash://{$addr}?amount={$sum}'>Ссылка со схемой dash:addr?amount=sum</a>"*/,
-        "disable_web_page_preview" => true,
-    ) );
-    file_put_contents( __DIR__ . "/input.log", "----- " . date( "Y-m-d H:i:s", time() ) . " -----\n", FILE_APPEND );
-    file_put_contents( __DIR__ . "/input.log", var_export( $r, true ) . "\n", FILE_APPEND );
+    $r = telegram(
+        "sendMessage",
+        [
+            "chat_id" => $input["callback_query"]["message"]["chat"]["id"],
+            "parse_mode" => "HTML",
+            "text" => "{$name}\n{$addr}\n{$sum} dash\nКопируйте все сообщение, мобильный кошелек сам найдет в нем адрес.",
+            "disable_web_page_preview" => true,
+        ]
+    );
 
     // Уведомляем Телеграм что получили запрос, чтобы крутяшка на кнопке остановилась
     // https://core.telegram.org/bots/api#answercallbackquery
-    $r = telegram( "answerCallbackQuery", array(
-        "callback_query_id" => $input["callback_query"]["id"],
-    ) );
+    $r = telegram(
+        "answerCallbackQuery",
+        [
+            "callback_query_id" => $input["callback_query"]["id"],
+        ]
+    );
 }
 
 
@@ -377,10 +445,10 @@ function update_dashrub() {
         $json = file_get_contents( "https://rates2.dashretail.org/rates?source=dashretail&symbol=dashrub" );
         $arr = json_decode( $json, true );
         if ( is_array( $arr ) ) {
-            $data["dashrub"] = array(
+            $data["dashrub"] = [
                 "price" => $arr[0]["price"],
                 "date" => time(),
-            );
+            ];
             // Сохраняем данные
             save_data();
         }
