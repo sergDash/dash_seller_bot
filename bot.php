@@ -299,14 +299,16 @@ if ( ! empty( $input["message"] ) && $input["message"]["text"] === "/start" ) {
     $addr = rpc( array( "method" => "getnewaddress", "params" => [] ) );
     file_put_contents( __DIR__ . "/input.log", '$addr = ' . var_export( $addr, true) . ";\n", FILE_APPEND );
 
-    $sku = $input["callback_query"]["data"];
+    $sku  = $input["callback_query"]["data"];
+    $curr = $products[$sku]["currency"];
     // Сумма
-    if ( $products[$sku]["currency"] === "dash" ) {
+    if ( $curr === "dash" ) {
         $sum = $products[$sku]["price"];
-    } elseif ( $products[$sku]["currency"] === "rub" ) {
+    } elseif ( $curr === "rub" ) {
         update_dashrub(); // Обновляем курс
         $sum = round( $products[$sku]["price"] / $data["dashrub"]["price"], 6 );
     } else {
+        // Неверная валюта
         $r = telegram( "sendMessage", array(
             "chat_id" => $input["callback_query"]["message"]["chat"]["id"],
             "text" => "Продавец был пьян и указал неверную валюту.",
@@ -379,6 +381,8 @@ function update_dashrub() {
                 "price" => $arr[0]["price"],
                 "date" => time(),
             );
+            // Сохраняем данные
+            save_data();
         }
     }
 }
