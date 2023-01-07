@@ -232,6 +232,7 @@ function input_log( $var, $label = "" ) {
 if ( isset( $argv ) && count( $argv ) > 1 ) {
     $txid = $argv[1];
     $tx = rpc( [ "method" => "gettransaction", "params" => [ $txid ] ] );
+    input_log( $tx, '$tx = ' );
 
     // Обрабатываем транзакцию
     if ( $tx["error"] !== NULL ) {
@@ -243,19 +244,24 @@ if ( isset( $argv ) && count( $argv ) > 1 ) {
 
         // Извлекаем заказ (адрес на который пришел перевод)
         $order_no = $tx["details"][0]["address"];
-        $order = $data["orders"][ $order_no ];
-        
-        // Сверяем сумму
-        if ( $order && $order["sum"] <= $tx["amount"] ) {
-            // Отправляем товар пользователю
-            $sku = $order["sku"];
-            $r = telegram(
-                "sendMessage",
-                [
-                    "chat_id" => $order["chat_id"],
-                    "text" => $products[$sku]["product"],
-                ]
-            );
+
+        // Фикс варнингов php при переброске входящего платежа
+        // на свой внешний кошелек
+        if ( isset( $data["orders"][ $order_no ] ) ) {
+            $order = $data["orders"][ $order_no ];
+            
+            // Сверяем сумму
+            if ( $order && $order["sum"] <= $tx["amount"] ) {
+                // Отправляем товар пользователю
+                $sku = $order["sku"];
+                $r = telegram(
+                    "sendMessage",
+                    [
+                        "chat_id" => $order["chat_id"],
+                        "text" => $products[$sku]["product"],
+                    ]
+                );
+            }
         }
 
 
