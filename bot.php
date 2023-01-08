@@ -36,8 +36,9 @@
     Для того чтобы нода постоянно работала, даже когда вы отключитесь от терминала,
     воспользуйтесь утилитой screen, запустите ее командой screen -S dash
     После этого запустите ноду в рабочее состояние:
-    ./dashd -instantsendnotify="php /путь/к/нашему/боту/bot.php %s"
+    ./dashd -instantsendnotify="php /путь/к/нашему/боту/bot.php %s" -walletnotify="php /путь/к/нашему/боту/bot.php %s"
     Нода будет непосредственно уведомлять нашего бота о поступающих транзакциях.
+    Но тут есть нюанс. Транзакция может быть отправлена без InstantSend и у нее будет признак 'trusted' => false
     Отключитесь от консоли комбинацией Ctrl+A d
     Последующее подключение к screen делайте командой screen -r dash
     А посмотреть список сессий можно командой screen -ls
@@ -229,56 +230,83 @@ function input_log( $var, $label = "" ) {
 // Мы получаем id транзакции с которой затем и работаем.
 // Сумма транзакции может быть и отрицательной, если это уведомление о том,
 // что был перевод не в кошелек, а из него.
-if ( isset( $argv ) && count( $argv ) > 1 ) {
-    $txid = $argv[1];
-    $tx = rpc( [ "method" => "gettransaction", "params" => [ $txid ] ] );
-    input_log( $tx, '$tx = ' );
+if ( isset( $argv ) ) {
+    if ( count( $argv ) === 2 ) {
+        input_log( $argv[1], '$argv[1] = ' );
+        $txid = $argv[1];
+        $tx = rpc( [ "method" => "gettransaction", "params" => [ $txid ] ] );
+        input_log( $tx, '$tx = ' );
 
-    // Обрабатываем транзакцию
-    if ( $tx["error"] !== NULL ) {
-        // Пришло уведомление об ошибке
+        // Обрабатываем транзакцию
+        if ( $tx["error"] !== NULL ) {
+            // Пришло уведомление об ошибке
 
-    } elseif ( $tx["result"] !== NULL ) {
+        } elseif ( $tx["result"] !== NULL ) {
 
-        $tx = $tx["result"];
+            $tx = $tx["result"];
 
-        // Извлекаем заказ (адрес на который пришел перевод)
-        $order_no = $tx["details"][0]["address"];
+            // Извлекаем заказ (адрес на который пришел перевод)
+            $order_no = $tx["details"][0]["address"];
 
-        // Фикс варнингов php при переброске входящего платежа
-        // на свой внешний кошелек
-        if ( isset( $data["orders"][ $order_no ] ) ) {
-            $order = $data["orders"][ $order_no ];
-            
-            // Сверяем сумму
-            if ( $order && $order["sum"] <= $tx["amount"] ) {
-                // Отправляем товар пользователю
-                $sku = $order["sku"];
-                $r = telegram(
-                    "sendMessage",
-                    [
-                        "chat_id" => $order["chat_id"],
-                        "text" => $products[$sku]["product"],
-                    ]
-                );
+            // Фикс варнингов php при переброске входящего платежа
+            // на свой внешний кошелек
+            if ( isset( $data["orders"][ $order_no ] ) ) {
+                $order = $data["orders"][ $order_no ];
+                
+                // Сверяем сумму
+                if ( $order && $order["sum"] <= $tx["amount"] ) {
+                    
+                    // Проверяем заблокирована ли сумма в InstantSend
+                    // Если нет, то не выдаем товар, а напишем что ждем подтверждений.
+                    if ( $tx["instantlock"] === true || $tx["confirmations"] > 0 ) {
+                    
+                        // Отправляем товар пользователю
+                        $sku = $order["sku"];
+                        $r = telegram(
+                            "sendMessage",
+                            [
+                                "chat_id" => $order["chat_id"],
+                                "text" => $products[$sku]["product"],
+                            ]
+                        );
+
+                        // Переправить дальше:
+                        if ( ! empty( $bot["resend_to_address"] ) && $tx["amount"] > 0 ) {
+                            // ./dash-cli help sendtoaddress
+                            $resend = rpc( [
+                                "method" => "sendtoaddress",
+                                "params" => [
+                                    $bot["resend_to_address"], $tx["amount"], "", "", true
+                                ]
+                            ] );
+                            // После переправки, бот снова получит уведомление о выполнении операции. Там сумма будет отрицательной.
+                            // Пишем в лог, прошла ли переброска. Если InstantSend не отработал, то не перебросит.
+                            input_log( $resend, '$resend = ' );
+                        }
+
+                    } else {
+                        // Сообщаем покупателю что ждем подтверждения
+                        $r = telegram(
+                            "sendMessage",
+                            [
+                                "chat_id" => $order["chat_id"],
+                                "text" => "Мы видим ваш перевод, но InstantSend не был задействован. Ждем подтверждение сети.",
+                            ]
+                        );
+
+                    }
+
+                }
+
             }
-        }
 
-
-        // Переправить дальше:
-        if ( ! empty( $bot["resend_to_address"] ) && $tx["amount"] > 0 ) {
-            // ./dash-cli help sendtoaddress
-            $resend = rpc( [
-                "method" => "sendtoaddress",
-                "params" => [
-                    $bot["resend_to_address"], $tx["amount"], "", "", true
-                ]
-            ] );
-            // После переправки, бот снова получит уведомление о выполнении операции. Там сумма будет отрицательной.
         }
+    } else {
+        input_log( "Неверное количество аргументов:" );
+        input_log( $argv, '$argv = ' );
     }
 
-
+    return;
 }
 
 
@@ -348,6 +376,29 @@ if ( ! empty( $input["message"] ) && $input["message"]["text"] === "/start" ) {
     // Получаем у ноды адрес для оплаты
     $addr = rpc( [ "method" => "getnewaddress", "params" => [] ] );
     input_log( $addr, 'Dash $addr = ' );
+
+    if ( empty( $addr ) ) {
+
+        // Сообщаем об ошибке
+        $r = telegram(
+            "sendMessage", 
+            [
+                "chat_id" => $input["callback_query"]["message"]["chat"]["id"],
+                "text" => "Dash-нода не выдала адрес.",
+            ]
+        );
+
+        // Уведомляем Телеграм что получили запрос, чтобы крутяшка на кнопке остановилась
+        // https://core.telegram.org/bots/api#answercallbackquery
+        $r = telegram(
+            "answerCallbackQuery",
+            [
+                "callback_query_id" => $input["callback_query"]["id"],
+            ]
+        );
+
+        return;
+    }
 
     $sku  = $input["callback_query"]["data"]; // артикул товара
     $curr = $products[$sku]["currency"];
