@@ -253,12 +253,32 @@ if ( isset( $argv ) ) {
             if ( isset( $data["orders"][ $order_no ] ) ) {
                 $order = $data["orders"][ $order_no ];
                 
+                // Если заказ уже отправлен, то выходим
+                if ( isset( $order["sended"] ) ) {
+                    return;
+                }
+
                 // Сверяем сумму
-                if ( $order && $order["sum"] <= $tx["amount"] ) {
+                if ( $order["sum"] <= $tx["amount"] ) {
+
+                    // Если dashd запущен с обоими параметрами
+                    // -instantsendnotify
+                    // -walletnotify
+                    // то будут прилетать два уведомления
+                    // Одно с instantlock, а другое без
+                    // и поэтому их нужно распознать раздельно
+                    $is_confirm      = $tx["instantlock"] === true  && $tx["confirmations"] === 0;
+                    $nois_confirm    = $tx["instantlock"] === false && $tx["confirmations"] > 0;
+                    // прилетит и третье
+                    $nois_confirm_is = $tx["instantlock"] === true && $tx["confirmations"] > 0;
+
                     
                     // Проверяем заблокирована ли сумма в InstantSend
                     // Если нет, то не выдаем товар, а напишем что ждем подтверждений.
-                    if ( $tx["instantlock"] === true || $tx["confirmations"] > 0 ) {
+                    if ( $is_confirm || $nois_confirm ) {
+
+                        $data["orders"][ $order_no ]["sended"] = true;
+                        save_data();
                     
                         // Отправляем товар пользователю
                         $sku = $order["sku"];
@@ -284,7 +304,28 @@ if ( isset( $argv ) ) {
                             input_log( $resend, '$resend = ' );
                         }
 
-                    } else {
+                    } elseif ( $tx["instantlock"] === false && $tx["confirmations"] === 0 ) {
+                        
+                        /*
+                        Данная секция не работает.
+                        Поскольку dashd сначала присылает информацию без instantlock
+                        А задержка не помогает - видимо dashd ждет завершение скрипта,
+                        и только потом присылает уведомление с instantsend.
+
+
+                        // Поэтом сделаем паузу для отключенного instantlock
+                        // Чтобы дать шанс отработать инстант-сенду вперед
+                        if ( $tx["instantlock"] === false ) {
+                            sleep( 5 );
+                            // С инстантлоком приходит через 3 секунды иногда,
+                            // Поэтом с запасом.
+                        }
+
+                        // Если заказ уже отправлен, то выходим
+                        if ( isset( $order["sended"] ) ) {
+                            return;
+                        }
+
                         // Сообщаем покупателю что ждем подтверждения
                         $r = telegram(
                             "sendMessage",
@@ -293,6 +334,7 @@ if ( isset( $argv ) ) {
                                 "text" => "Мы видим ваш перевод, но InstantSend не был задействован. Ждем подтверждение сети.",
                             ]
                         );
+                        */
 
                     }
 
@@ -373,32 +415,14 @@ if ( ! empty( $input["message"] ) && $input["message"]["text"] === "/start" ) {
 
 } elseif ( ! empty( $input["callback_query"] ) ) { // Кто-то нажал на кнопку
 
-    // Получаем у ноды адрес для оплаты
-    $addr = rpc( [ "method" => "getnewaddress", "params" => [] ] );
-    input_log( $addr, 'Dash $addr = ' );
-
-    if ( empty( $addr ) ) {
-
-        // Сообщаем об ошибке
-        $r = telegram(
-            "sendMessage", 
-            [
-                "chat_id" => $input["callback_query"]["message"]["chat"]["id"],
-                "text" => "Dash-нода не выдала адрес.",
-            ]
-        );
-
-        // Уведомляем Телеграм что получили запрос, чтобы крутяшка на кнопке остановилась
-        // https://core.telegram.org/bots/api#answercallbackquery
-        $r = telegram(
-            "answerCallbackQuery",
-            [
-                "callback_query_id" => $input["callback_query"]["id"],
-            ]
-        );
-
-        return;
-    }
+    // Уведомляем Телеграм что получили запрос, чтобы крутяшка на кнопке остановилась
+    // https://core.telegram.org/bots/api#answercallbackquery
+    $r = telegram(
+        "answerCallbackQuery",
+        [
+            "callback_query_id" => $input["callback_query"]["id"],
+        ]
+    );
 
     $sku  = $input["callback_query"]["data"]; // артикул товара
     $curr = $products[$sku]["currency"];
@@ -433,16 +457,26 @@ if ( ! empty( $input["message"] ) && $input["message"]["text"] === "/start" ) {
             ]
         );
 
-        // Уведомляем Телеграм что получили запрос, чтобы крутяшка на кнопке остановилась
-        // https://core.telegram.org/bots/api#answercallbackquery
-        $r = telegram(
-            "answerCallbackQuery",
-            [
-                "callback_query_id" => $input["callback_query"]["id"],
-            ]
-        );
         return;
 
+    }
+
+    // Получаем у ноды адрес для оплаты
+    $addr = rpc( [ "method" => "getnewaddress", "params" => [] ] );
+    input_log( $addr, 'Dash $addr = ' );
+
+    if ( empty( $addr ) ) {
+
+        // Сообщаем об ошибке
+        $r = telegram(
+            "sendMessage", 
+            [
+                "chat_id" => $input["callback_query"]["message"]["chat"]["id"],
+                "text" => "Dash-нода не выдала адрес.",
+            ]
+        );
+
+        return;
     }
 
     // Оформляем и сохраняем заказ.
@@ -481,14 +515,6 @@ if ( ! empty( $input["message"] ) && $input["message"]["text"] === "/start" ) {
         ]
     );
 
-    // Уведомляем Телеграм что получили запрос, чтобы крутяшка на кнопке остановилась
-    // https://core.telegram.org/bots/api#answercallbackquery
-    $r = telegram(
-        "answerCallbackQuery",
-        [
-            "callback_query_id" => $input["callback_query"]["id"],
-        ]
-    );
 }
 
 
