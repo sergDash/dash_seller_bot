@@ -10,7 +10,7 @@
 
     Так же нужна dash-нода и 36+ гигабайт места на диске под блокчейн.
     Это полный кошелек, скачать его нужно по ссылке:
-    https://github.com/dashpay/dash/releases/download/v18.1.0/dashcore-18.1.0-x86_64-linux-gnu.tar.gz
+    https://github.com/dashpay/dash/releases/download/v18.1.1/dashcore-18.1.1-x86_64-linux-gnu.tar.gz
     Распаковать командой tar -xzf dashcore-18.1.0-x86_64-linux-gnu.tar.gz
     Перейти в папку dashcore-18.1.0/bin/
     и запустить командой ./dashd --usehd, чтобы сразу создать правильный HD-кошелек.
